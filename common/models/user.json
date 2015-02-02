@@ -19,10 +19,6 @@
       "type": "object",
       "deprecated": true
     },
-    "email": {
-      "type": "string",
-      "required": true
-    },
     "emailVerified": "boolean",
     "verificationToken": "string",
     "status": "string",
