@@ -62,12 +62,16 @@ assert(Role, 'Role model must be defined before ACL model');
  * @property {String} property Name of the property, method, scope, or relation.
  * @property {String} accessType Type of access being granted: one of READ, WRITE, or EXECUTE.
  * @property {String} permission Type of permission granted. One of:
+ *
  *  - ALARM: Generate an alarm, in a system-dependent way, the access specified in the permissions component of the ACL entry.
  *  - ALLOW: Explicitly grants access to the resource.
  *  - AUDIT: Log, in a system-dependent way, the access specified in the permissions component of the ACL entry.
  *  - DENY: Explicitly denies access to the resource.
  * @property {String} principalType Type of the principal; one of: Application, Use, Role.
- * @property {String} principalId ID of the principal - such as appId, userId or roleId
+ * @property {String} principalId ID of the principal - such as appId, userId or roleId.
+ * @property {Object} settings Extends the `Model.settings` object.
+ * @property {String} settings.defaultPermission Default permission setting: ALLOW, DENY, ALARM, or AUDIT. Default is ALLOW.
+ * Set to DENY to prohibit all API access by default.
  *
  * @class ACL
  * @inherits PersistedModel
@@ -252,10 +256,14 @@ module.exports = function(ACL) {
     var staticACLs = [];
     if (modelClass && modelClass.settings.acls) {
       modelClass.settings.acls.forEach(function(acl) {
-        if (!acl.property || acl.property === ACL.ALL || property === acl.property) {
+        var prop = acl.property;
+        // We support static ACL property with array of string values.
+        if (Array.isArray(prop) && prop.indexOf(property) >= 0)
+          prop = property;
+        if (!prop || prop === ACL.ALL || property === prop) {
           staticACLs.push(new ACL({
             model: model,
-            property: acl.property || ACL.ALL,
+            property: prop || ACL.ALL,
             principalType: acl.principalType,
             principalId: acl.principalId, // TODO: Should it be a name?
             accessType: acl.accessType || ACL.ALL,

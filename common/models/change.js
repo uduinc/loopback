@@ -13,13 +13,17 @@ var debug = require('debug')('loopback:change');
 /**
  * Change list entry.
  *
- * @property {String} id Hash of the modelName and id
- * @property {String} rev The current model revision
- * @property {String} prev The previous model revision
- * @property {Number} checkpoint The current checkpoint at time of the change
- * @property {String} modelName Model name
- * @property {String} modelId Model ID
- *
+ * @property {String} id Hash of the modelName and ID.
+ * @property {String} rev The current model revision.
+ * @property {String} prev The previous model revision.
+ * @property {Number} checkpoint The current checkpoint at time of the change.
+ * @property {String} modelName Model name.
+ * @property {String} modelId Model ID.
+ * @property {Object} settings Extends the `Model.settings` object.
+ * @property {String} settings.hashAlgorithm Algorithm used to create cryptographic hash, used as argument
+ * to [crypto.createHash](http://nodejs.org/api/crypto.html#crypto_crypto_createhash_algorithm).  Default is sha1.
+ * @property {Boolean} settings.ignoreErrors By default, when changes are rectified, an error will throw an exception.
+ * However, if this setting is true, then errors will not throw exceptions.
  * @class Change
  * @inherits {PersistedModel}
  */
@@ -137,10 +141,6 @@ module.exports = function(Change) {
 
   Change.prototype.rectify = function(cb) {
     var change = this;
-    var tasks = [
-      updateRevision,
-      updateCheckpoint
-    ];
     var currentRev = this.rev;
 
     change.debug('rectify change');
@@ -149,8 +149,53 @@ module.exports = function(Change) {
       if (err) throw new Error(err);
     };
 
-    async.parallel(tasks, function(err) {
+    async.parallel([
+      function getCurrentCheckpoint(next) {
+        change.constructor.getCheckpointModel().current(next);
+      },
+      function getCurrentRevision(next) {
+        change.currentRevision(next);
+      }
+    ], doRectify);
+
+    function doRectify(err, results) {
       if (err) return cb(err);
+      var checkpoint = results[0];
+      var rev = results[1];
+
+      if (rev) {
+        // avoid setting rev and prev to the same value
+        if (currentRev === rev) {
+          change.debug('rev and prev are equal (not updating rev)');
+        } else {
+          change.rev = rev;
+          change.debug('updated revision (was ' + currentRev + ')');
+          if (change.checkpoint !== checkpoint) {
+            // previous revision is updated only across checkpoints
+            change.prev = currentRev;
+            change.debug('updated prev');
+          }
+        }
+      } else {
+        change.rev = null;
+        change.debug('updated revision (was ' + currentRev + ')');
+        if (change.checkpoint !== checkpoint) {
+          // previous revision is updated only across checkpoints
+          if (currentRev) {
+            change.prev = currentRev;
+          } else if (!change.prev) {
+            change.debug('ERROR - could not determing prev');
+            change.prev = Change.UNKNOWN;
+          }
+          change.debug('updated prev');
+        }
+      }
+
+      if (change.checkpoint != checkpoint) {
+        debug('update checkpoint to', checkpoint);
+        change.checkpoint = checkpoint;
+      }
+
       if (change.prev === Change.UNKNOWN) {
         // this occurs when a record of a change doesn't exist
         // and its current revision is null (not found)
@@ -158,40 +203,6 @@ module.exports = function(Change) {
       } else {
         change.save(cb);
       }
-    });
-
-    function updateRevision(cb) {
-      // get the current revision
-      change.currentRevision(function(err, rev) {
-        if (err) return Change.handleError(err, cb);
-        if (rev) {
-          // avoid setting rev and prev to the same value
-          if (currentRev !== rev) {
-            change.rev = rev;
-            change.prev = currentRev;
-          } else {
-            change.debug('rev and prev are equal (not updating rev)');
-          }
-        } else {
-          change.rev = null;
-          if (currentRev) {
-            change.prev = currentRev;
-          } else if (!change.prev) {
-            change.debug('ERROR - could not determing prev');
-            change.prev = Change.UNKNOWN;
-          }
-        }
-        change.debug('updated revision (was ' + currentRev + ')');
-        cb();
-      });
-    }
-
-    function updateCheckpoint(cb) {
-      change.constructor.getCheckpointModel().current(function(err, checkpoint) {
-        if (err) return Change.handleError(err);
-        change.checkpoint = checkpoint;
-        cb();
-      });
     }
   };
 
@@ -408,9 +419,10 @@ module.exports = function(Change) {
     // this should be optimized
     this.find(function(err, changes) {
       if (err) return cb(err);
-      changes.forEach(function(change) {
-        change.rectify();
-      });
+      async.each(
+        changes,
+        function(c, next) { c.rectify(next); },
+        cb);
     });
   };
 
@@ -422,9 +434,11 @@ module.exports = function(Change) {
   Change.getCheckpointModel = function() {
     var checkpointModel = this.Checkpoint;
     if (checkpointModel) return checkpointModel;
+    // FIXME(bajtos) This code creates multiple different models with the same
+    // model name, which is not a valid supported usage of juggler's API.
     this.Checkpoint = checkpointModel = loopback.Checkpoint.extend('checkpoint');
-    assert(this.dataSource, 'Cannot getCheckpointModel(): ' + this.modelName
-      + ' is not attached to a dataSource');
+    assert(this.dataSource, 'Cannot getCheckpointModel(): ' + this.modelName +
+      ' is not attached to a dataSource');
     checkpointModel.attachTo(this.dataSource);
     return checkpointModel;
   };
@@ -438,10 +452,13 @@ module.exports = function(Change) {
   Change.prototype.debug = function() {
     if (debug.enabled) {
       var args = Array.prototype.slice.call(arguments);
+      args[0] = args[0] + ' %s';
+      args.push(this.modelName);
       debug.apply(this, args);
       debug('\tid', this.id);
       debug('\trev', this.rev);
       debug('\tprev', this.prev);
+      debug('\tcheckpoint', this.checkpoint);
       debug('\tmodelName', this.modelName);
       debug('\tmodelId', this.modelId);
       debug('\ttype', this.type());

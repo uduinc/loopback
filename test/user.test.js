@@ -12,6 +12,7 @@ describe('User', function() {
   var validCredentialsEmailVerified = {email: 'foo1@bar.com', password: 'bar1', emailVerified: true};
   var validCredentialsEmailVerifiedOverREST = {email: 'foo2@bar.com', password: 'bar2', emailVerified: true};
   var validCredentialsWithTTL = {email: 'foo@bar.com', password: 'bar', ttl: 3600};
+  var validCredentialsWithTTLAndScope = {email: 'foo@bar.com', password: 'bar', ttl: 3600, scope: 'all'};
   var invalidCredentials = {email: 'foo1@bar.com', password: 'invalid'};
   var incompleteCredentials = {password: 'bar1'};
 
@@ -137,6 +138,13 @@ describe('User', function() {
       assert(u.password !== 'bar');
     });
 
+    it('does not hash the password if it\'s already hashed', function() {
+      var u1 = new User({username: 'foo', password: 'bar'});
+      assert(u1.password !== 'bar');
+      var u2 = new User({username: 'foo', password: u1.password});
+      assert(u2.password === u1.password);
+    });
+
     describe('custom password hash', function() {
       var defaultHashPassword;
       var defaultValidatePassword;
@@ -240,6 +248,36 @@ describe('User', function() {
         });
       });
     });
+
+    it('Login a user using a custom createAccessToken with options',
+      function(done) {
+        var createToken = User.prototype.createAccessToken; // Save the original method
+        // Override createAccessToken
+        User.prototype.createAccessToken = function(ttl, options, cb) {
+          // Reduce the ttl by half for testing purpose
+          this.accessTokens.create({ttl: ttl / 2, scopes: options.scope}, cb);
+        };
+        User.login(validCredentialsWithTTLAndScope, function(err, accessToken) {
+          assert(accessToken.userId);
+          assert(accessToken.id);
+          assert.equal(accessToken.ttl, 1800);
+          assert.equal(accessToken.id.length, 64);
+          assert.equal(accessToken.scopes, 'all');
+
+          User.findById(accessToken.userId, function(err, user) {
+            user.createAccessToken(120, {scope: 'default'}, function(err, accessToken) {
+              assert(accessToken.userId);
+              assert(accessToken.id);
+              assert.equal(accessToken.ttl, 60);
+              assert.equal(accessToken.id.length, 64);
+              assert.equal(accessToken.scopes, 'default');
+              // Restore create access token
+              User.prototype.createAccessToken = createToken;
+              done();
+            });
+          });
+        });
+      });
 
     it('Login should only allow correct credentials', function(done) {
       User.login(invalidCredentials, function(err, accessToken) {
@@ -845,9 +883,9 @@ describe('User', function() {
       it('Confirm a user verification', function(done) {
         testConfirm(function(result, done) {
           request(app)
-            .get('/users/confirm?uid=' + (result.uid)
-              + '&token=' + encodeURIComponent(result.token)
-              + '&redirect=' + encodeURIComponent(options.redirect))
+            .get('/users/confirm?uid=' + (result.uid) +
+              '&token=' + encodeURIComponent(result.token) +
+              '&redirect=' + encodeURIComponent(options.redirect))
             .expect(302)
             .end(function(err, res) {
               if (err) {
@@ -858,12 +896,34 @@ describe('User', function() {
         }, done);
       });
 
+      it('Should report 302 when redirect url is set', function(done) {
+        testConfirm(function(result, done) {
+          request(app)
+            .get('/users/confirm?uid=' + (result.uid) +
+              '&token=' + encodeURIComponent(result.token) +
+              '&redirect=http://foo.com/bar')
+            .expect(302)
+            .expect('Location', 'http://foo.com/bar')
+            .end(done);
+        }, done);
+      });
+
+      it('Should report 204 when redirect url is not set', function(done) {
+        testConfirm(function(result, done) {
+          request(app)
+            .get('/users/confirm?uid=' + (result.uid) +
+              '&token=' + encodeURIComponent(result.token))
+            .expect(204)
+            .end(done);
+        }, done);
+      });
+
       it('Report error for invalid user id during verification', function(done) {
         testConfirm(function(result, done) {
           request(app)
-            .get('/users/confirm?uid=' + (result.uid + '_invalid')
-              + '&token=' + encodeURIComponent(result.token)
-              + '&redirect=' + encodeURIComponent(options.redirect))
+            .get('/users/confirm?uid=' + (result.uid + '_invalid') +
+               '&token=' + encodeURIComponent(result.token) +
+               '&redirect=' + encodeURIComponent(options.redirect))
             .expect(404)
             .end(function(err, res) {
               if (err) {
@@ -880,9 +940,9 @@ describe('User', function() {
       it('Report error for invalid token during verification', function(done) {
         testConfirm(function(result, done) {
           request(app)
-            .get('/users/confirm?uid=' + result.uid
-              + '&token=' + encodeURIComponent(result.token) + '_invalid'
-              + '&redirect=' + encodeURIComponent(options.redirect))
+            .get('/users/confirm?uid=' + result.uid +
+              '&token=' + encodeURIComponent(result.token) + '_invalid' +
+              '&redirect=' + encodeURIComponent(options.redirect))
             .expect(400)
             .end(function(err, res) {
               if (err) {

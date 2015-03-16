@@ -9,8 +9,9 @@ var RoleMapping = loopback.RoleMapping;
 assert(RoleMapping, 'RoleMapping model must be defined before Role model');
 
 /**
- * The Role Model
+ * The Role model
  * @class Role
+ * @header Role object
  */
 module.exports = function(Role) {
 
@@ -104,19 +105,23 @@ module.exports = function(Role) {
   });
 
   function isUserClass(modelClass) {
-    return modelClass === loopback.User ||
-      modelClass.prototype instanceof loopback.User;
+    if (modelClass) {
+      return modelClass === loopback.User ||
+        modelClass.prototype instanceof loopback.User;
+    } else {
+      return false;
+    }
   }
 
   /*!
-   * Check if two user ids matches
+   * Check if two user IDs matches
    * @param {*} id1
    * @param {*} id2
    * @returns {boolean}
    */
   function matches(id1, id2) {
-    if (id1 === undefined || id1 === null || id1 === ''
-      || id2 === undefined || id2 === null || id2 === '') {
+    if (id1 === undefined || id1 === null || id1 === '' ||
+      id2 === undefined || id2 === null || id2 === '') {
       return false;
     }
     // The id can be a MongoDB ObjectID
@@ -157,7 +162,8 @@ module.exports = function(Role) {
       }
       debug('Model found: %j', inst);
       var ownerId = inst.userId || inst.owner;
-      if (ownerId) {
+      // Ensure ownerId exists and is not a function/relation
+      if (ownerId && 'function' !== typeof ownerId) {
         if (callback) callback(null, matches(ownerId, userId));
         return;
       } else {
@@ -196,11 +202,12 @@ module.exports = function(Role) {
   });
 
   /**
-   * Check if the user id is authenticated
-   * @param {Object} context The security context
-   * @callback {Function} callback
-   * @param {Error} err
-   * @param {Boolean} isAuthenticated
+   * Check if the user ID is authenticated
+   * @param {Object} context The security context.
+   *
+   * @callback {Function} callback Callback function.
+   * @param {Error} err Error object.
+   * @param {Boolean} isAuthenticated True if the user is authenticated.
    */
   Role.isAuthenticated = function isAuthenticated(context, callback) {
     process.nextTick(function() {
@@ -221,13 +228,14 @@ module.exports = function(Role) {
   });
 
   /**
-   * Check if a given principal is in the role
+   * Check if a given principal is in the specified role.
    *
-   * @param {String} role The role name
-   * @param {Object} context The context object
-   * @callback {Function} callback
-   * @param {Error} err
-   * @param {Boolean} isInRole
+   * @param {String} role The role name.
+   * @param {Object} context The context object.
+   *
+   * @callback {Function} callback Callback function.
+   * @param {Error} err Error object.
+   * @param {Boolean} isInRole True if the principal is in the specified role.
    */
   Role.isInRole = function(role, context, callback) {
     if (!(context instanceof AccessContext)) {
@@ -312,13 +320,12 @@ module.exports = function(Role) {
   };
 
   /**
-   * List roles for a given principal
-   * @param {Object} context The security context
-   * @param {Function} callback
+   * List roles for a given principal.
+   * @param {Object} context The security context.
    *
-   * @callback {Function} callback
-   * @param {Error=} err
-   * @param {String[]} roles An array of role ids
+   * @callback {Function} callback Callback function.
+   * @param {Error} err Error object.
+   * @param {String[]} roles An array of role IDs
    */
   Role.getRoles = function(context, callback) {
     if (!(context instanceof AccessContext)) {
