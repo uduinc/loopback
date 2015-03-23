@@ -1,3 +1,5 @@
+# No longer in use by udu as of 23 Mar 2015
+
 # LoopBack
 
 [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/strongloop/loopback?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
